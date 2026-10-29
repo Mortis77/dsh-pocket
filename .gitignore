@@ -1,0 +1,16 @@
+# build outputs
+*.apk
+*.dex
+classes/
+dexout/
+res-compiled.zip
+app-unsigned.apk
+app-aligned.apk
+
+# signing material never goes in the repo
+*.jks
+*.keystore
+
+# local bits
+*.log
+*.local
