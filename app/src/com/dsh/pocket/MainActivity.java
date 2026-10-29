@@ -10,6 +10,9 @@ import android.os.Bundle;
 import android.view.Gravity;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
+import android.webkit.URLUtil;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -18,6 +21,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.TextView;
+import android.os.Environment;
 
 /**
  * A thin shell around the already-working remote web surface: one WebView bound to
@@ -32,13 +36,18 @@ public final class MainActivity extends Activity {
     /** Mobile layout rules applied inside the shell regardless of the server skin. */
     /** Where the shell looks for a newer build; the path is served by the same box. */
     private static final String UPDATE_BASE = "https://YOUR-UPDATE-HOST.example.com";
-    private static final int VERSION_CODE = 14;
+    /** Update endpoint on the local network: reachable without any tunnel. */
+    private static final String LOCAL_UPDATE_BASE = "http://YOUR-LAN-IP:8897";
+
+    private static final int VERSION_CODE = 15;
 
     private static final String MOBILE_CSS = "@media (max-width:900px){[data-dsh-skin-layer]{display:none!important}header[class*='_header']:has([class*='_titleRow']){min-height:0!important;padding:8px 12px 8px 52px!important}header[class*='_header'] [class*='_tabs']{display:none!important}[class*='_crumbSep']{display:none!important}[data-composer-card] button,[data-composer-card] [role='button']{min-height:36px!important;min-width:36px!important;padding:0 10px!important;font-size:13px!important;border-radius:10px!important}[data-composer-card] .dsh-cu-chip,[data-composer-card] .dshp-rewind,[data-composer-card] [title*='\u6e32\u67d3']{display:none!important}[data-composer-card] button.control{max-width:88px!important;overflow:hidden!important;white-space:nowrap!important}[class*='_bubble']{padding:8px 12px!important;border-radius:14px!important}[class*='_headerUtilities']{gap:2px!important}div[style*='position: fixed'][style*='2147483000'],button[style*='2147483000']{display:none!important}[class*='citeciter']{display:none!important}.fm-widget{display:none!important}body{--dsh-content-font-size:15px!important}}";
 
     private WebView web;
     private SharedPreferences prefs;
     private TextView statusBar;
+    private ValueCallback<Uri[]> pendingFileCallback;
+    private static final int REQ_FILE = 300;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -143,6 +152,49 @@ public final class MainActivity extends Activity {
             }
         });
 
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback,
+                                             FileChooserParams params) {
+                if (pendingFileCallback != null) pendingFileCallback.onReceiveValue(null);
+                pendingFileCallback = callback;
+                try {
+                    Intent picker = params.createIntent();
+                    picker.addCategory(Intent.CATEGORY_OPENABLE);
+                    startActivityForResult(picker, REQ_FILE);
+                    return true;
+                } catch (Exception e) {
+                    pendingFileCallback = null;
+                    showSticky("打开文件选择器失败：" + e.getMessage());
+                    return false;
+                }
+            }
+        });
+
+        // Downloads inside the app page: hand them to the system downloader, carrying
+        // the page's cookies because dsh gates its file routes on the session.
+        web.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {
+            try {
+                android.app.DownloadManager.Request request =
+                        new android.app.DownloadManager.Request(Uri.parse(url));
+                if (userAgent != null) request.addRequestHeader("User-Agent", userAgent);
+                String cookie = CookieManager.getInstance().getCookie(url);
+                if (cookie != null && !cookie.isEmpty()) request.addRequestHeader("Cookie", cookie);
+                String name = URLUtil.guessFileName(url, contentDisposition, mimeType);
+                if (mimeType != null) request.setMimeType(mimeType);
+                request.setTitle(name);
+                request.setNotificationVisibility(
+                        android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name);
+                android.app.DownloadManager manager =
+                        (android.app.DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+                manager.enqueue(request);
+                showSticky("已开始下载：" + name);
+            } catch (Exception e) {
+                showSticky("下载失败：" + e.getMessage());
+            }
+        });
+
         String origin = prefs.getString(KEY_ORIGIN, DEFAULT_ORIGIN);
         if (origin.contains("YOUR-RELAY")) {
             askForOrigin();
@@ -229,6 +281,23 @@ public final class MainActivity extends Activity {
         if (requestCode == 200 && resultCode == RESULT_OK && data != null) {
             openPairLink(data.getStringExtra("url"));
         }
+        if (requestCode == REQ_FILE) {
+            if (pendingFileCallback == null) return;
+            Uri[] results = null;
+            if (resultCode == RESULT_OK && data != null) {
+                if (data.getClipData() != null) {
+                    int count = data.getClipData().getItemCount();
+                    results = new Uri[count];
+                    for (int i = 0; i < count; i++) {
+                        results[i] = data.getClipData().getItemAt(i).getUri();
+                    }
+                } else if (data.getData() != null) {
+                    results = new Uri[]{data.getData()};
+                }
+            }
+            pendingFileCallback.onReceiveValue(results);
+            pendingFileCallback = null;
+        }
     }
 
     private void clearSession() {
@@ -275,30 +344,42 @@ public final class MainActivity extends Activity {
 
     /** Ask the update endpoint for a newer build and hand the APK to the system installer. */
     private void checkUpdate() {
-        String base = prefs.getString("updateBase", UPDATE_BASE);
+        String override = prefs.getString("updateBase", "");
+        String[] candidates = {override, LOCAL_UPDATE_BASE, UPDATE_BASE};
         new Thread(() -> {
-            java.net.HttpURLConnection c = null;
-            try {
-                c = (java.net.HttpURLConnection) new java.net.URL(base + "/version.json").openConnection();
-                c.setConnectTimeout(8000);
-                c.setReadTimeout(8000);
-                if (c.getResponseCode() != 200) return;
-                java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
-                java.io.InputStream in = c.getInputStream();
-                byte[] chunk = new byte[4096];
-                int n;
-                while ((n = in.read(chunk)) > 0) buf.write(chunk, 0, n);
-                in.close();
-                org.json.JSONObject json = new org.json.JSONObject(buf.toString("UTF-8"));
-                int latest = json.optInt("versionCode", 0);
-                String file = json.optString("file", "");
-                if (latest > VERSION_CODE && !file.isEmpty()) downloadUpdate(base + "/" + file, latest);
-            } catch (Exception ignored) {
-            } finally {
-                if (c != null) c.disconnect();
+            for (String candidate : candidates) {
+                if (candidate == null || candidate.isEmpty()) continue;
+                if (probeUpdate(candidate)) return;
             }
         }, "update-check").start();
     }
+
+    /** One update endpoint: true when it answered and the version check completed. */
+    private boolean probeUpdate(String base) {
+        java.net.HttpURLConnection c = null;
+        try {
+            c = (java.net.HttpURLConnection) new java.net.URL(base + "/version.json").openConnection();
+            c.setConnectTimeout(8000);
+            c.setReadTimeout(8000);
+            if (c.getResponseCode() != 200) return false;
+            java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+            java.io.InputStream in = c.getInputStream();
+            byte[] chunk = new byte[4096];
+            int n;
+            while ((n = in.read(chunk)) > 0) buf.write(chunk, 0, n);
+            in.close();
+            org.json.JSONObject json = new org.json.JSONObject(buf.toString("UTF-8"));
+            int latest = json.optInt("versionCode", 0);
+            String file = json.optString("file", "");
+            if (latest > VERSION_CODE && !file.isEmpty()) downloadUpdate(base + "/" + file, latest);
+            return true;
+        } catch (Exception e) {
+            return false;
+        } finally {
+            if (c != null) c.disconnect();
+        }
+    }
+
 
     private void downloadUpdate(String url, int versionCode) {
         try {
