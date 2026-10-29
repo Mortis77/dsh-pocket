@@ -27,11 +27,11 @@ public final class MainActivity extends Activity {
 
     private static final String PREFS = "dsh-shell";
     private static final String KEY_ORIGIN = "origin";
-    private static final String DEFAULT_ORIGIN = "https://cae7db40d0c63dd8.dsh-market.com";
+    private static final String DEFAULT_ORIGIN = "https://YOUR-RELAY.dsh-market.com";
 
     /** Mobile layout rules applied inside the shell regardless of the server skin. */
     /** Where the shell looks for a newer build; the path is served by the same box. */
-    private static final String UPDATE_BASE = "https://securities-defines-relating-rivers.trycloudflare.com";
+    private static final String UPDATE_BASE = "https://YOUR-UPDATE-HOST.example.com";
     private static final int VERSION_CODE = 13;
 
     private static final String MOBILE_CSS = "@media (max-width:900px){[data-dsh-skin-layer]{display:none!important}header[class*='_header']:has([class*='_titleRow']){min-height:0!important;padding:8px 12px 8px 52px!important}header[class*='_header'] [class*='_tabs']{display:none!important}[class*='_crumbSep']{display:none!important}[data-composer-card] button,[data-composer-card] [role='button']{min-height:36px!important;min-width:36px!important;padding:0 10px!important;font-size:13px!important;border-radius:10px!important}[data-composer-card] .dsh-cu-chip,[data-composer-card] .dshp-rewind,[data-composer-card] [title*='\u6e32\u67d3']{display:none!important}[data-composer-card] button.control{max-width:88px!important;overflow:hidden!important;white-space:nowrap!important}[class*='_bubble']{padding:8px 12px!important;border-radius:14px!important}[class*='_headerUtilities']{gap:2px!important}div[style*='position: fixed'][style*='2147483000'],button[style*='2147483000']{display:none!important}[class*='citeciter']{display:none!important}.fm-widget{display:none!important}body{--dsh-content-font-size:15px!important}}";
