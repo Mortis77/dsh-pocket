@@ -32,7 +32,7 @@ public final class MainActivity extends Activity {
     /** Mobile layout rules applied inside the shell regardless of the server skin. */
     /** Where the shell looks for a newer build; the path is served by the same box. */
     private static final String UPDATE_BASE = "https://YOUR-UPDATE-HOST.example.com";
-    private static final int VERSION_CODE = 13;
+    private static final int VERSION_CODE = 14;
 
     private static final String MOBILE_CSS = "@media (max-width:900px){[data-dsh-skin-layer]{display:none!important}header[class*='_header']:has([class*='_titleRow']){min-height:0!important;padding:8px 12px 8px 52px!important}header[class*='_header'] [class*='_tabs']{display:none!important}[class*='_crumbSep']{display:none!important}[data-composer-card] button,[data-composer-card] [role='button']{min-height:36px!important;min-width:36px!important;padding:0 10px!important;font-size:13px!important;border-radius:10px!important}[data-composer-card] .dsh-cu-chip,[data-composer-card] .dshp-rewind,[data-composer-card] [title*='\u6e32\u67d3']{display:none!important}[data-composer-card] button.control{max-width:88px!important;overflow:hidden!important;white-space:nowrap!important}[class*='_bubble']{padding:8px 12px!important;border-radius:14px!important}[class*='_headerUtilities']{gap:2px!important}div[style*='position: fixed'][style*='2147483000'],button[style*='2147483000']{display:none!important}[class*='citeciter']{display:none!important}.fm-widget{display:none!important}body{--dsh-content-font-size:15px!important}}";
 
@@ -144,7 +144,11 @@ public final class MainActivity extends Activity {
         });
 
         String origin = prefs.getString(KEY_ORIGIN, DEFAULT_ORIGIN);
-        web.loadUrl(origin);
+        if (origin.contains("YOUR-RELAY")) {
+            askForOrigin();
+        } else {
+            web.loadUrl(origin);
+        }
 
         web.postDelayed(this::checkUpdate, 4000);
     }
@@ -154,6 +158,35 @@ public final class MainActivity extends Activity {
     }
 
     /** Paste the pairing link copied from the desktop panel. */
+
+    /** First launch on a fresh install: ask where this shell should point. */
+    private void askForOrigin() {
+        EditText field = new EditText(this);
+        field.setHint("https://xxxx.dsh-market.com");
+        field.setTextSize(13);
+        field.setPadding(dp(16), dp(12), dp(16), dp(12));
+
+        new AlertDialog.Builder(this)
+                .setTitle("DSH 远程入口")
+                .setMessage("填你电脑端生成的中继域名，或者直接扫码配对。")
+                .setView(field)
+                .setPositiveButton("保存", (dialog, which) -> {
+                    String raw = field.getText().toString().trim();
+                    if (raw.isEmpty()) {
+                        askForOrigin();
+                        return;
+                    }
+                    if (!raw.startsWith("http")) raw = "https://" + raw;
+                    String normalised = raw.endsWith("/") ? raw.substring(0, raw.length() - 1) : raw;
+                    prefs.edit().putString(KEY_ORIGIN, normalised).apply();
+                    web.loadUrl(normalised);
+                })
+                .setNeutralButton("扫码配对", (dialog, which) ->
+                        startActivityForResult(new Intent(this, ScanActivity.class), 200))
+                .setCancelable(false)
+                .show();
+    }
+
     private void askForPairLink() {
         EditText field = new EditText(this);
         field.setHint("https://<id>.dsh-market.com/pair-accept?pair=…");
@@ -203,8 +236,8 @@ public final class MainActivity extends Activity {
         CookieManager.getInstance().flush();
         prefs.edit().remove(KEY_ORIGIN).apply();
         web.clearCache(true);
-        showStatus("已清除配对，重新打开页面");
-        web.loadUrl(DEFAULT_ORIGIN);
+        showStatus("已清除配对");
+        askForOrigin();
     }
 
 

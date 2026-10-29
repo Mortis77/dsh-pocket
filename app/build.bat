@@ -4,7 +4,7 @@ set JAVA_HOME=C:\dsh-app-build\jdk\jdk-21.0.12.1+1
 set SDK=C:\dsh-app-build\sdk
 set BT=%SDK%\build-tools\35.0.0
 set AJAR=%SDK%\platforms\android-34\android.jar
-cd /d C:\dsh-app-build\app
+cd /d "%~dp0"
 
 echo [1/6] compiling java
 if exist classes rmdir /s /q classes
